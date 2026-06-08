@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "FreshKeep",
+    "slug": "freshkeep",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#4a7c59"
+    },
+    "android": {
+      "package": "com.freshkeep.app",
+      "compileSdkVersion": 36,
+      "targetSdkVersion": 36,
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-notifications",
+      "expo-av",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "kotlinVersion": "2.1.20"
+          }
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "57ef498a-b6ee-4898-8fe9-da2d2d56418e"
+      }
+    }
+  }
+}

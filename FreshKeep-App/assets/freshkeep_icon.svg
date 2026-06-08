@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+
+  <!-- App icon background -->
+  <rect width="1024" height="1024" rx="230" fill="#4a7c59"/>
+
+  <!-- Leaf blade - main dark layer -->
+  <path d="M512 160
+    C640 160 730 256 730 384
+    C730 504 634 580 512 610
+    C390 580 294 504 294 384
+    C294 256 384 160 512 160Z"
+    fill="#3a6649"/>
+
+  <!-- Leaf highlight - mid layer -->
+  <path d="M512 200
+    C618 200 698 278 698 384
+    C698 486 622 558 520 594
+    C534 562 550 524 550 484
+    C550 396 536 298 512 200Z"
+    fill="#5a8f6b"/>
+
+  <!-- Leaf tip shine -->
+  <ellipse cx="672" cy="246" rx="38" ry="20"
+    fill="#7aab86" opacity="0.55"
+    transform="rotate(-38 672 246)"/>
+
+  <!-- Central vein -->
+  <path d="M512 600
+    C512 530 512 460 512 340
+    C512 270 520 210 512 160"
+    fill="none" stroke="#2e5038"
+    stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Left veins -->
+  <path d="M512 430 C462 404 418 390 380 382"
+    fill="none" stroke="#2e5038"
+    stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+  <path d="M512 360 C468 338 430 322 400 316"
+    fill="none" stroke="#2e5038"
+    stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+  <path d="M512 292 C474 274 444 262 420 256"
+    fill="none" stroke="#2e5038"
+    stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Right veins -->
+  <path d="M512 470 C558 448 596 432 628 426"
+    fill="none" stroke="#2e5038"
+    stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+  <path d="M512 380 C554 360 590 346 614 340"
+    fill="none" stroke="#2e5038"
+    stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+
+  <!-- Clock circle - expiry metaphor -->
+  <circle cx="512" cy="420" r="130"
+    fill="none" stroke="#ffffff" stroke-width="14" opacity="0.92"/>
+
+  <!-- Clock tick marks -->
+  <line x1="512" y1="300" x2="512" y2="320" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+  <line x1="512" y1="520" x2="512" y2="540" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+  <line x1="392" y1="420" x2="412" y2="420" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+  <line x1="612" y1="420" x2="632" y2="420" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Hour hand (pointing ~11 o'clock) -->
+  <line x1="512" y1="420" x2="472" y2="336"
+    stroke="#ffffff" stroke-width="14"
+    stroke-linecap="round"/>
+
+  <!-- Minute hand (pointing ~2 o'clock) -->
+  <line x1="512" y1="420" x2="590" y2="390"
+    stroke="#ffffff" stroke-width="10"
+    stroke-linecap="round"/>
+
+  <!-- Center dot -->
+  <circle cx="512" cy="420" r="14" fill="#ffffff"/>
+
+  <!-- Stem -->
+  <path d="M512 608 C512 660 496 700 488 740"
+    fill="none" stroke="#3a6649"
+    stroke-width="10" stroke-linecap="round"/>
+
+</svg>
