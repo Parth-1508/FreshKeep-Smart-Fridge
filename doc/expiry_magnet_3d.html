@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Expiry Fridge Magnet — 3D Model</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0f0f12; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+canvas { display: block; }
+#ui {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 18px 22px; pointer-events: none;
+}
+#title-block h1 { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: .3px; }
+#title-block p  { font-size: 11px; color: #777; margin-top: 2px; }
+#controls { display: flex; flex-direction: column; gap: 7px; pointer-events: all; }
+.btn {
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.13);
+  color: #ccc; font-size: 12px; padding: 7px 14px; border-radius: 8px;
+  cursor: pointer; transition: background .15s; white-space: nowrap; text-align: left;
+}
+.btn:hover { background: rgba(255,255,255,0.13); }
+.btn.active { background: rgba(180,83,9,0.35); border-color: #b45309; color: #fcd34d; }
+#hint {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: #444; pointer-events: none; white-space: nowrap;
+}
+#labels-div {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; display: none;
+}
+#labels-div.on { display: block; }
+.lbl {
+  position: absolute; font-size: 11px; color: #bbb;
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.lbl span.dot { width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+.lbl span.ln  { width: 24px; height: 1px; background: rgba(245,158,11,.5); flex-shrink: 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="title-block">
+    <h1>Smart Expiry Fridge Magnet</h1>
+    <p>MIT ADT · Group 3 · Interactive 3D Model</p>
+  </div>
+  <div id="controls">
+    <button class="btn active" id="b-front"   onclick="view('front')">⬜ Front view</button>
+    <button class="btn"        id="b-back"    onclick="view('back')">⬛ Back view</button>
+    <button class="btn"        id="b-side"    onclick="view('side')">◧ Side view</button>
+    <button class="btn"        id="b-explode" onclick="doExplode()">💥 Explode layers</button>
+    <button class="btn"        id="b-labels"  onclick="doLabels()">🏷 Labels</button>
+  </div>
+</div>
+<div id="labels-div">
+  <div class="lbl" id="l0"><span class="dot"></span><span class="ln"></span>Tempered glass (9×6 cm)</div>
+  <div class="lbl" id="l1"><span class="ln"></span><span class="dot"></span>3.5″ TFT touchscreen ST7796</div>
+  <div class="lbl" id="l2"><span class="dot"></span><span class="ln"></span>ABS enclosure 12×8×2.5 cm</div>
+  <div class="lbl" id="l3"><span class="ln"></span><span class="dot"></span>Navigation buttons</div>
+  <div class="lbl" id="l4"><span class="dot"></span><span class="ln"></span>Status LED strip</div>
+  <div class="lbl" id="l5"><span class="ln"></span><span class="dot"></span>Neodymium magnet 8×1 cm</div>
+  <div class="lbl" id="l6"><span class="dot"></span><span class="ln"></span>USB-C port (5V)</div>
+  <div class="lbl" id="l7"><span class="ln"></span><span class="dot"></span>ESP32 + PCB board</div>
+</div>
+<div id="hint">Drag to rotate · Scroll to zoom</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f0f12);
+scene.fog = new THREE.Fog(0x0f0f12, 18, 35);
+
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(0, 0, 8);
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+resize();
+addEventListener('resize', resize);
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const key = new THREE.DirectionalLight(0xfff8e7, 1.1);
+key.position.set(4,6,5); key.castShadow = true; scene.add(key);
+const fill = new THREE.DirectionalLight(0xb0c8ff, 0.4);
+fill.position.set(-4,2,3); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xff8020, 0.25);
+rim.position.set(0,-3,-5); scene.add(rim);
+
+// Device dims (1 unit ~ 10mm)
+const DW=0.8, DH=1.2, DD=0.25;
+
+// Materials
+const mBody  = new THREE.MeshStandardMaterial({color:0x1c1814, roughness:0.55, metalness:0.1});
+const mSide  = new THREE.MeshStandardMaterial({color:0x2e2820, roughness:0.6,  metalness:0.05});
+const mGlass = new THREE.MeshStandardMaterial({color:0x88aacc, roughness:0.02, transparent:true, opacity:0.22, side:THREE.DoubleSide});
+const mMag   = new THREE.MeshStandardMaterial({color:0x2a2a2a, roughness:0.28, metalness:0.75});
+const mPCB   = new THREE.MeshStandardMaterial({color:0x1a4a1e, roughness:0.7,  emissive:0x0a2010, emissiveIntensity:0.3});
+const mUSB   = new THREE.MeshStandardMaterial({color:0x888888, roughness:0.2,  metalness:0.8});
+const mBtn   = new THREE.MeshStandardMaterial({color:0x3a3028, roughness:0.45, metalness:0.2});
+const mBtnB  = new THREE.MeshStandardMaterial({color:0x4a3c2c, roughness:0.35, metalness:0.25});
+const mLEDG  = new THREE.MeshStandardMaterial({color:0x00ff55, emissive:0x00ff55, emissiveIntensity:2.5});
+const mLEDA  = new THREE.MeshStandardMaterial({color:0xffaa00, emissive:0xffaa00, emissiveIntensity:2.0});
+const mLEDR  = new THREE.MeshStandardMaterial({color:0xff2222, emissive:0xff2222, emissiveIntensity:1.8});
+const mStrip = new THREE.MeshStandardMaterial({color:0xff9900, emissive:0xff9900, emissiveIntensity:1.5, transparent:true, opacity:0.9});
+
+function B(w,h,d,mat,x=0,y=0,z=0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true;
+  return m;
+}
+function C(r,h,mat,x=0,y=0,z=0,rx=0) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,24), mat);
+  m.position.set(x,y,z); m.rotation.x=rx; m.castShadow=true;
+  return m;
+}
+
+// ── Device group ──────────────────────────────────────────────────────────────
+const dev = new THREE.Group();
+scene.add(dev);
+
+// Layer groups for explode
+const gBody   = new THREE.Group();
+const gPCB    = new THREE.Group();
+const gScreen = new THREE.Group();
+const gGlass  = new THREE.Group();
+dev.add(gBody, gPCB, gScreen, gGlass);
+
+// BODY
+gBody.add(B(DW, DH, DD*0.72, mBody, 0,0,-DD*0.14));
+gBody.add(B(0.022, DH, DD, mSide, -DW/2+0.011,0,0));
+gBody.add(B(0.022, DH, DD, mSide,  DW/2-0.011,0,0));
+gBody.add(B(DW, 0.022, DD, mSide,  0, DH/2-0.011,0));
+gBody.add(B(DW, 0.022, DD, mSide,  0,-DH/2+0.011,0));
+// chin
+gBody.add(B(DW*0.94, DH*0.12, DD*0.4, mBody, 0,-DH/2+DH*0.06, DD/2-0.01));
+
+// PCB
+const pcb = B(DW*0.88, DH*0.76, 0.018, mPCB, 0, DH*0.04, DD*0.04);
+gPCB.add(pcb);
+// ESP32
+gPCB.add(B(0.1,0.065,0.022, new THREE.MeshStandardMaterial({color:0x1e1e1e,roughness:0.85}), -0.1, DH*0.04+0.02, DD*0.04+0.02));
+// RTC
+gPCB.add(B(0.06,0.04,0.016, new THREE.MeshStandardMaterial({color:0x181818,roughness:0.9}),  0.12,DH*0.04-0.1,  DD*0.04+0.02));
+// Capacitors
+for(let i=0;i<4;i++){
+  gPCB.add(C(0.01,0.025, new THREE.MeshStandardMaterial({color:0x664422}), -0.22+i*0.07, DH*0.04+0.15+0.025/2, DD*0.04+0.02));
+}
+// Vibration sensor
+gPCB.add(B(0.05,0.04,0.015, new THREE.MeshStandardMaterial({color:0x333333,roughness:0.7}), 0.2, DH*0.04+0.14, DD*0.04+0.02));
+
+// SCREEN
+const scrMod = B(DW*0.84, DH*0.56, 0.032, new THREE.MeshStandardMaterial({color:0x0a1810,roughness:0.1, emissive:0x061008, emissiveIntensity:0.5}), 0, DH*0.08, DD*0.27);
+gScreen.add(scrMod);
+
+// Build screen texture
+const sc = document.createElement('canvas');
+sc.width=256; sc.height=384;
+const x = sc.getContext('2d');
+x.fillStyle='#0d1f14'; x.fillRect(0,0,256,384);
+// Header
+x.fillStyle='#1a3320'; x.fillRect(0,0,256,48);
+x.fillStyle='#f59e0b'; x.font='bold 13px monospace'; x.fillText('SMART EXPIRY',14,18);
+x.fillStyle='#86efac'; x.font='9px monospace'; x.fillText('● BT Connected',14,36);
+x.fillStyle='#3b82f6'; x.fillRect(218,6,30,34);
+x.fillStyle='#fff'; x.font='bold 20px monospace'; x.fillText('✦',222,28);
+// Items
+const items=[
+  {n:'Milk',      d:'2 days',  c:'#f59e0b', p:0.25},
+  {n:'Yoghurt',   d:'TODAY',   c:'#ef4444', p:0.03},
+  {n:'Bread',     d:'5 days',  c:'#22c55e', p:0.60},
+  {n:'Eggs',      d:'8 days',  c:'#22c55e', p:0.82},
+  {n:'Cheddar',   d:'1 day',   c:'#f97316', p:0.12},
+];
+items.forEach((it,i)=>{
+  const y=58+i*60;
+  x.fillStyle=i%2===0?'#112218':'#0d1a10'; x.fillRect(0,y,256,58);
+  x.fillStyle=it.c; x.beginPath(); x.arc(17,y+19,7,0,Math.PI*2); x.fill();
+  x.fillStyle='#e5e7eb'; x.font='bold 13px monospace'; x.fillText(it.n,32,y+23);
+  x.fillStyle=it.c;      x.font='10px monospace';       x.fillText(it.d,32,y+40);
+  x.fillStyle='#1f3a24'; x.fillRect(148,y+13,88,8);
+  x.fillStyle=it.c;      x.fillRect(148,y+13,Math.round(88*it.p),8);
+});
+// Footer
+x.fillStyle='#1a1a1a'; x.fillRect(0,362,256,22);
+x.fillStyle='#555'; x.font='9px monospace'; x.fillText('5 items · tap to dismiss',12,375);
+
+const scrTex = new THREE.CanvasTexture(sc);
+const scrFace = new THREE.Mesh(
+  new THREE.PlaneGeometry(DW*0.81, DH*0.53),
+  new THREE.MeshStandardMaterial({map:scrTex, emissive:0x113318, emissiveIntensity:0.35, roughness:0.05})
+);
+scrFace.position.set(0, DH*0.08, DD*0.286);
+gScreen.add(scrFace);
+
+// GLASS
+gGlass.add(B(DW*0.9, DH*0.73, 0.013, mGlass, 0, DH*0.08, DD/2-0.004));
+const glEdge = B(DW*0.9+0.012, DH*0.73+0.012, 0.008,
+  new THREE.MeshStandardMaterial({color:0xaaccee, transparent:true, opacity:0.09}), 0, DH*0.08, DD/2-0.001);
+gGlass.add(glEdge);
+
+// ── Buttons (always on top of dev) ────────────────────────────────────────────
+dev.add(C(0.027,0.042,mBtn,  -DW*0.22,-DH*0.435,DD/2+0.006, Math.PI/2));
+dev.add(C(0.042,0.052,mBtnB,  0,       -DH*0.435,DD/2+0.007, Math.PI/2));
+dev.add(C(0.027,0.042,mBtn,   DW*0.22, -DH*0.435,DD/2+0.006, Math.PI/2));
+dev.add(C(0.02, 0.028,mBtn,   DW*0.36, -DH*0.435,DD/2+0.003, Math.PI/2));
+
+// LED strip
+const ledStrip = B(DW*0.86, 0.016, 0.013, mStrip, 0, DH/2-0.038, DD/2+0.004);
+dev.add(ledStrip);
+dev.add(C(0.008,0.012,mLEDG, -0.06, DH/2-0.038, DD/2+0.009, Math.PI/2));
+dev.add(C(0.008,0.012,mLEDA,  0,    DH/2-0.038, DD/2+0.009, Math.PI/2));
+dev.add(C(0.008,0.012,mLEDR,  0.06, DH/2-0.038, DD/2+0.009, Math.PI/2));
+
+// Back: magnets
+dev.add(B(DW*0.76, 0.075, 0.014, mMag, 0, DH*0.3,  -DD/2-0.007));
+dev.add(B(DW*0.76, 0.075, 0.014, mMag, 0,-DH*0.3, -DD/2-0.007));
+// pole lines
+for(let i=-3;i<=3;i++){
+  const pm = new THREE.MeshStandardMaterial({color:0x999999,roughness:0.2,metalness:0.85});
+  dev.add(B(0.004,0.07,0.017,pm, i*0.08, DH*0.3,  -DD/2-0.008));
+  dev.add(B(0.004,0.07,0.017,pm, i*0.08,-DH*0.3, -DD/2-0.008));
+}
+// USB-C
+dev.add(B(0.062,0.026,0.022,mUSB, 0,-DH/2+0.042,-DD/2-0.011));
+dev.add(B(0.05, 0.016,0.026, new THREE.MeshStandardMaterial({color:0x222222}), 0,-DH/2+0.042,-DD/2-0.013));
+
+// BT nub
+dev.add(C(0.01,0.048,mUSB, DW*0.34,DH/2-0.06,-DD/2));
+
+// Shadow plane
+const sp = new THREE.Mesh(new THREE.PlaneGeometry(14,14), new THREE.MeshStandardMaterial({color:0x0a0a0d}));
+sp.rotation.x=-Math.PI/2; sp.position.y=-1.8; sp.receiveShadow=true;
+scene.add(sp);
+// Glow
+const gw = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.5), new THREE.MeshBasicMaterial({color:0xb45309,transparent:true,opacity:0.1}));
+gw.rotation.x=-Math.PI/2; gw.position.y=-1.0;
+scene.add(gw);
+
+// ── Explode state ─────────────────────────────────────────────────────────────
+let exploded = false;
+const explodeTargets = [
+  {g:gBody,   tz:0}, {g:gPCB,    tz:0},
+  {g:gScreen, tz:0}, {g:gGlass,  tz:0}
+];
+
+function doExplode(){
+  exploded = !exploded;
+  document.getElementById('b-explode').classList.toggle('active', exploded);
+  if(exploded){
+    explodeTargets[0].tz=-0.38;
+    explodeTargets[1].tz= 0.0;
+    explodeTargets[2].tz= 0.38;
+    explodeTargets[3].tz= 0.72;
+  } else {
+    explodeTargets.forEach(e=>e.tz=0);
+  }
+}
+
+let labelsOn = false;
+function doLabels(){
+  labelsOn=!labelsOn;
+  document.getElementById('b-labels').classList.toggle('active',labelsOn);
+  document.getElementById('labels-div').classList.toggle('on',labelsOn);
+}
+
+// ── View targets ──────────────────────────────────────────────────────────────
+let tY=0, tX=0.15, cY=0, cX=0.15;
+let autoRot=true, autoTimer=null;
+
+function view(v){
+  autoRot=false; clearTimeout(autoTimer);
+  autoTimer=setTimeout(()=>{autoRot=true;},7000);
+  document.querySelectorAll('.btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('b-'+v).classList.add('active');
+  if(v==='front'){tY=0;       tX=0.15;}
+  if(v==='back') {tY=Math.PI; tX=0.12;}
+  if(v==='side') {tY=Math.PI/2; tX=0.1;}
+}
+
+// ── Mouse drag ────────────────────────────────────────────────────────────────
+let drag=false, lx=0, ly=0;
+canvas.addEventListener('mousedown', e=>{drag=true;lx=e.clientX;ly=e.clientY;autoRot=false;clearTimeout(autoTimer);});
+addEventListener('mouseup', ()=>{drag=false; autoTimer=setTimeout(()=>{autoRot=true;},4000);});
+addEventListener('mousemove', e=>{
+  if(!drag)return;
+  tY+=(e.clientX-lx)*0.013;
+  tX+=(e.clientY-ly)*0.009;
+  tX=Math.max(-0.6,Math.min(0.7,tX));
+  lx=e.clientX;ly=e.clientY;
+});
+canvas.addEventListener('touchstart',e=>{drag=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;autoRot=false;},{passive:true});
+addEventListener('touchend',()=>{drag=false;});
+addEventListener('touchmove',e=>{
+  if(!drag)return;
+  tY+=(e.touches[0].clientX-lx)*0.013;
+  tX+=(e.touches[0].clientY-ly)*0.009;
+  lx=e.touches[0].clientX;ly=e.touches[0].clientY;
+},{passive:true});
+canvas.addEventListener('wheel',e=>{
+  camera.position.z=Math.max(3,Math.min(14,camera.position.z+e.deltaY*0.009));
+},{passive:true});
+
+// ── Label 3D→2D projection ────────────────────────────────────────────────────
+const tmpV = new THREE.Vector3();
+const labelAnchors = [
+  {id:'l0', p:[ DW*0.5+0.05, DH*0.25,  DD/2]},    // glass
+  {id:'l1', p:[-DW*0.5-0.05, DH*0.08,  DD/2]},    // screen
+  {id:'l2', p:[ DW*0.5+0.05,-DH*0.1,   0  ]},     // body
+  {id:'l3', p:[-DW*0.5-0.05,-DH*0.44,  DD/2]},    // buttons
+  {id:'l4', p:[ DW*0.5+0.05, DH*0.47,  DD/2]},    // led
+  {id:'l5', p:[-DW*0.5-0.05, DH*0.28, -DD/2]},    // magnet
+  {id:'l6', p:[ DW*0.5+0.05,-DH*0.45, -DD/2]},    // usb
+  {id:'l7', p:[-DW*0.5-0.05, 0,        0  ]},     // pcb
+];
+
+function updateLabelPositions(){
+  if(!labelsOn)return;
+  labelAnchors.forEach(a=>{
+    const el=document.getElementById(a.id); if(!el)return;
+    tmpV.set(...a.p);
+    tmpV.applyEuler(dev.rotation);
+    tmpV.add(dev.position);
+    tmpV.project(camera);
+    const sx=(tmpV.x*.5+.5)*innerWidth;
+    const sy=(-tmpV.y*.5+.5)*innerHeight;
+    el.style.left=Math.max(8,Math.min(innerWidth-220,sx-30))+'px';
+    el.style.top =Math.max(8,Math.min(innerHeight-28,sy-7)) +'px';
+  });
+}
+
+// ── Animate ───────────────────────────────────────────────────────────────────
+let t=0;
+function tick(){
+  requestAnimationFrame(tick);
+  t+=0.016;
+
+  if(autoRot) tY+=0.004;
+  cY+=(tY-cY)*0.065;
+  cX+=(tX-cX)*0.065;
+  dev.rotation.y=cY;
+  dev.rotation.x=cX;
+  dev.position.y=Math.sin(t*0.45)*0.028;
+
+  // Explode lerp
+  explodeTargets.forEach(e=>{
+    e.g.position.z+=(e.tz-e.g.position.z)*0.09;
+  });
+
+  // LED strip pulse
+  ledStrip.material.emissiveIntensity=0.8+0.5*Math.sin(t*1.2);
+  const phase=(t%9);
+  if(phase<3)      ledStrip.material.emissive.set(0xff2222);
+  else if(phase<6) ledStrip.material.emissive.set(0xffaa00);
+  else             ledStrip.material.emissive.set(0x00ff55);
+
+  updateLabelPositions();
+  renderer.render(scene,camera);
+}
+tick();
+</script>
+</body>
+</html>

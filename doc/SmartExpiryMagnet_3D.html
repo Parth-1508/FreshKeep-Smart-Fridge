@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Expiry Fridge Magnet — 3D Model</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1c1917;font-family:Arial,sans-serif;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;cursor:grab}
+canvas:active{cursor:grabbing}
+#controls{position:fixed;top:16px;left:16px;display:flex;gap:8px;flex-wrap:wrap;z-index:10}
+.vbtn{background:rgba(180,83,9,0.92);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:700}
+.vbtn.sec{background:rgba(41,37,34,0.92);color:#fcd34d;border:1px solid #b45309}
+#title{position:fixed;top:16px;right:16px;text-align:right;z-index:10}
+#title h1{font-size:14px;color:#fcd34d;font-weight:700;letter-spacing:.5px}
+#title p{font-size:11px;color:#78716c;margin-top:3px}
+#hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);font-size:12px;color:#78716c;z-index:10}
+#specs{position:fixed;bottom:44px;left:16px;background:rgba(0,0,0,0.6);border:1px solid #292524;border-radius:8px;padding:10px 14px;z-index:10}
+#specs h3{font-size:10px;color:#b45309;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+#specs p{font-size:11px;color:#d6d3d1;line-height:1.75}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls">
+  <button class="vbtn"     onclick="goView(0)">Front</button>
+  <button class="vbtn sec" onclick="goView(1)">Rear</button>
+  <button class="vbtn sec" onclick="goView(2)">Side</button>
+  <button class="vbtn sec" onclick="goView(3)">3/4 View</button>
+  <button class="vbtn sec" onclick="goView(4)">Explode</button>
+</div>
+<div id="title">
+  <h1>SMART EXPIRY FRIDGE MAGNET</h1>
+  <p>Group 3 · MIT ADT University · DT Project</p>
+</div>
+<div id="hint">Drag to rotate · Scroll to zoom</div>
+<div id="specs">
+  <h3>Device Specs</h3>
+  <p>
+    Dimensions: 12 × 8 × 2.2 cm<br>
+    Display: 3.5&quot; TFT ST7796 · 480×320 px<br>
+    MCU: ESP32 (Bluetooth + Wi-Fi)<br>
+    Mount: Neodymium magnet strips<br>
+    Power: USB-C 5V · RTC: DS3231<br>
+    Alerts: LED (Green/Amber/Red) + Buzzer
+  </p>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x1c1917);
+scene.fog=new THREE.FogExp2(0x1c1917,0.04);
+const camera=new THREE.PerspectiveCamera(36,window.innerWidth/window.innerHeight,0.1,100);
+scene.add(new THREE.AmbientLight(0xfff8f0,0.7));
+
+const sun=new THREE.DirectionalLight(0xfff5e0,2.2);
+sun.position.set(5,9,8);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+scene.add(sun);
+
+// FIX 1: Properly instantiated lights instead of using Object.assign on read-only vector properties
+const fillLight = new THREE.DirectionalLight(0xffeebb, 0.5);
+fillLight.position.set(-6, 2, 4);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xffd060, 0.3);
+rimLight.position.set(1, -5, -7);
+scene.add(rimLight);
+
+function mat(c,r,m){return new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m})}
+const M={
+  body:mat(0xdedad6,.22,.04),edge:mat(0xb5b0ab,.30,.05),back:mat(0xcac6c2,.32,.04),
+  btn:mat(0x6b6560,.30,.35),btnM:mat(0x3d3935,.25,.50),magS:mat(0x807d7a,.25,.75),
+  magC:mat(0x252220,.40,.60),pcb:mat(0x1a4a28,.55,.12),chip:mat(0x252220,.25,.55),
+  usb:mat(0x909090,.18,.85),dark:mat(0x080808,.80,.0),
+  ledG:new THREE.MeshStandardMaterial({color:0x22c55e,emissive:0x22c55e,emissiveIntensity:2.0,roughness:.3}),
+  ledA:new THREE.MeshStandardMaterial({color:0xf59e0b,emissive:0xf59e0b,emissiveIntensity:1.6,roughness:.3}),
+  ledR:new THREE.MeshStandardMaterial({color:0xef4444,emissive:0xef4444,emissiveIntensity:2.2,roughness:.3}),
+  glass:new THREE.MeshPhysicalMaterial({color:0x99bbff,roughness:.02,transparent:true,opacity:.14,transmission:.85}),
+};
+
+function makeUI(){
+  const cv=document.createElement('canvas');cv.width=300;cv.height=460;
+  const cx=cv.getContext('2d');
+  cx.fillStyle='#0c0c0c';cx.fillRect(0,0,300,460);
+  cx.fillStyle='#1c1917';cx.fillRect(0,0,300,58);
+  cx.fillStyle='#f59e0b';cx.font='bold 12px Arial';cx.fillText('SMART EXPIRY MAGNET',10,22);
+  cx.fillStyle='#60a5fa';cx.font='10px Arial';cx.fillText('● BT Connected',10,42);
+  [{c:'#22c55e',x:248},{c:'#f59e0b',x:265},{c:'#ef4444',x:282}].forEach(l=>{cx.fillStyle=l.c;cx.beginPath();cx.arc(l.x,14,7,0,Math.PI*2);cx.fill();});
+  [{nm:'Milk',d:'2 days left',c:'#f59e0b'},{nm:'Yoghurt',d:'Expires today',c:'#ef4444'},
+   {nm:'Bread',d:'5 days left',c:'#22c55e'},{nm:'Spinach',d:'3 days left',c:'#22c55e'},
+   {nm:'Eggs',d:'7 days left',c:'#22c55e'}].forEach((r,i)=>{
+    const y=68+i*66;cx.fillStyle=i%2===0?'#171513':'#1c1917';cx.fillRect(0,y,300,65);
+    cx.fillStyle=r.c;cx.beginPath();cx.arc(20,y+33,9,0,Math.PI*2);cx.fill();
+    cx.fillStyle='#f5f5f4';cx.font='bold 14px Arial';cx.fillText(r.nm,38,y+26);
+    cx.fillStyle=r.c;cx.font='11px Arial';cx.fillText(r.d,38,y+46);
+    cx.fillStyle='#292524';cx.fillRect(0,y+64,300,1);
+  });
+  cx.fillStyle='#1c1917';cx.fillRect(0,428,300,32);
+  cx.fillStyle='#78716c';cx.font='10px Arial';cx.fillText('EXPIRY TRACKER  v1.0  |  MIT ADT',10,448);
+  return new THREE.CanvasTexture(cv);
+}
+M.scrUI=new THREE.MeshStandardMaterial({map:makeUI(),roughness:.05,emissive:0x0a0800,emissiveIntensity:.55});
+
+const DH=6,DW=4,DD=1.12;
+const device=new THREE.Group();scene.add(device);
+const parts=[];
+function P(geo,mat,px,py,pz,rx,dx,dy,dz){
+  const m=new THREE.Mesh(geo,mat);
+  m.position.set(px,py,pz);if(rx)m.rotation.x=rx;
+  m.castShadow=true;m.receiveShadow=true;
+  device.add(m);parts.push({mesh:m,hx:px,hy:py,hz:pz,dx:dx||0,dy:dy||0,dz:dz||0});
+  return m;
+}
+
+P(new THREE.BoxGeometry(DW,DH,DD),M.body,0,0,0,0, 0,0,0);
+P(new THREE.BoxGeometry(DW,DH,.07),M.edge,0,0,DD/2,0, 0,0,.3);
+P(new THREE.BoxGeometry(2.75,3.72,.05),M.scrUI,0,.28,DD/2+.06,0, 0,0,1.1);
+P(new THREE.BoxGeometry(2.75,3.72,.03),M.glass,0,.28,DD/2+.10,0, 0,0,1.4);
+[{x:-.95,m:M.ledG},{x:0,m:M.ledA},{x:.95,m:M.ledR}].forEach(l=>
+  P(new THREE.BoxGeometry(.72,.21,.1),l.m,l.x,DH/2-.21,DD/2+.04,0, 0,.8,.6));
+[-1.0,0,1.0].forEach((bx,i)=>{
+  P(new THREE.CylinderGeometry(.24,.24,.14,32),i===1?M.btnM:M.btn,bx,-DH/2+.42,DD/2+.06,Math.PI/2, 0,-.7,.6);
+  P(new THREE.CylinderGeometry(.13,.13,.16,32),M.btnM,bx,-DH/2+.42,DD/2+.11,Math.PI/2, 0,-.7,.6);
+});
+P(new THREE.BoxGeometry(.38,.17,.36),M.usb,0,-DH/2-.01,0,0, 0,-1.2,0);
+P(new THREE.BoxGeometry(.24,.09,.28),M.dark,0,-DH/2,.04,0, 0,-1.2,0);
+P(new THREE.BoxGeometry(DW-.06,DH-.06,.07),M.back,0,0,-DD/2,0, 0,0,-.5);
+P(new THREE.BoxGeometry(2.4,2.0,.09),M.pcb,0,.5,-DD/2-.04,0, 0,0,-1.5);
+P(new THREE.BoxGeometry(.65,.45,.11),M.chip,-.3,.55,-DD/2-.11,0, 0,0,-2.0);
+P(new THREE.BoxGeometry(.35,.35,.09),M.chip,.45,.3,-DD/2-.11,0, 0,0,-2.0);
+P(new THREE.CylinderGeometry(.22,.22,.1,32),mat(0x1a1a1a,.3,.5),.5,-.5,-DD/2-.09,0, 0,0,-1.8);
+[-1.18,-.4,.4,1.18].forEach(sx=>{
+  P(new THREE.BoxGeometry(.27,DH*.72,.19),M.magS,sx,0,-DD/2-.09,0, 0,0,-.9);
+  P(new THREE.BoxGeometry(.17,DH*.68,.09),M.magC,sx,0,-DD/2-.19,0, 0,0,-1.1);
+});
+
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(30,30),new THREE.ShadowMaterial({opacity:.3}));
+floor.rotation.x=-Math.PI/2;floor.position.y=-DH/2-.9;floor.receiveShadow=true;scene.add(floor);
+
+let explodeT=0,exploded=false;
+const VIEWS=[{ry:0,rx:-.06,d:8.5},{ry:Math.PI,rx:-.06,d:8.5},{ry:Math.PI/2,rx:-.08,d:9},{ry:.62,rx:-.22,d:8.5},{ry:.5,rx:-.3,d:13}];
+let tRy=.62,tRx=-.22,tDist=8.5,cRy=.62,cRx=-.22,cDist=8.5;
+
+window.goView=function(i){exploded=(i===4);tRy=VIEWS[i].ry;tRx=VIEWS[i].rx;tDist=VIEWS[i].d;};
+
+let drag=false,lx=0,ly=0;
+canvas.addEventListener('mousedown',e=>{drag=true;lx=e.clientX;ly=e.clientY;});
+window.addEventListener('mouseup',()=>drag=false);
+window.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  tRy+=(e.clientX-lx)*.012;
+  tRx+=(e.clientY-ly)*.008;
+  tRx=Math.max(-1.2,Math.min(1,tRx));
+  lx=e.clientX;
+  ly=e.clientY;
+});
+
+canvas.addEventListener('touchstart',e=>{drag=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;},{passive:true});
+window.addEventListener('touchend',()=>drag=false);
+window.addEventListener('touchmove',e=>{
+  if(!drag)return;
+  tRy+=(e.touches[0].clientX-lx)*.012;
+  tRx+=(e.touches[0].clientY-ly)*.008;
+  
+  // FIX 2: Added the vertical rotation clamp for mobile touch devices
+  tRx=Math.max(-1.2,Math.min(1,tRx));
+  
+  lx=e.touches[0].clientX;
+  ly=e.touches[0].clientY;
+},{passive:true});
+
+canvas.addEventListener('wheel',e=>{tDist=Math.max(4,Math.min(18,tDist+e.deltaY*.015));e.preventDefault();},{passive:false});
+
+let t=0;
+function render(){
+  requestAnimationFrame(render);t+=.018;
+  cRy+=(tRy-cRy)*.1;cRx+=(tRx-cRx)*.1;cDist+=(tDist-cDist)*.1;
+  device.rotation.y=cRy;device.rotation.x=cRx;
+  camera.position.set(0,.3+cDist*.13,cDist*.99);camera.lookAt(0,.2,0);
+  
+  explodeT+=(exploded?1:-1)*.04;explodeT=Math.max(0,Math.min(1,explodeT));
+  parts.forEach(p=>p.mesh.position.set(p.hx+p.dx*explodeT,p.hy+p.dy*explodeT,p.hz+p.dz*explodeT));
+  
+  M.ledG.emissiveIntensity=1.6+.5*Math.sin(t*1.1);
+  M.ledA.emissiveIntensity=1.3+.6*Math.sin(t*.85+1);
+  M.ledR.emissiveIntensity=1.8+1*Math.abs(Math.sin(t*2.6));
+  
+  renderer.render(scene,camera);
+}
+render();
+
+window.addEventListener('resize',()=>{
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>
