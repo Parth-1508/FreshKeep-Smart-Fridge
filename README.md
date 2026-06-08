@@ -35,4 +35,4 @@ FreshKeep is a full-stack IoT ecosystem designed to tackle household food waste.
 
 ## 👨‍💻 Credits & Development
 **Software Architecture, App Development & AI Integration:** Engineered entirely by Parth Pate. 
-**Hardware Assembly & Research:** Physical hardware assembly and Design Thinking research collaborated with Utkarsh Tushti and Parth Pawar for the MIT-ADT Pratibhuti 3.0 Exhibition.
+**Hardware Assembly & Research:** Physical hardware assembly and Design Thinking research collaborated with Utkarsh Korhale,Tushti Rastogi, Parth Pawar and Mokshda Mankar for the MIT-ADT Pratibhuti 3.0 Exhibition.
