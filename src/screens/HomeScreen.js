@@ -1,15 +1,52 @@
 // src/screens/HomeScreen.js
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   View, Text, ScrollView, StyleSheet,
-  TouchableOpacity, StatusBar, 
+  TouchableOpacity, StatusBar, Animated, Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useInventory } from '../context/InventoryContext';
 import { useTheme }     from '../context/ThemeContext';
 import ItemCard from '../components/ItemCard';
+
+// ── Looping "live sync" pulse dot — signals active background sync with the
+//    Smart Fridge Magnet, sitting next to the Bluetooth connection badge. ──
+function SyncPulseDot({ color = '#4ade80' }) {
+  const scale   = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.8)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.parallel([
+        Animated.timing(scale, {
+          toValue: 2.4,
+          duration: 1400,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [scale, opacity]);
+
+  return (
+    <View style={s.pulseWrap}>
+      <Animated.View
+        style={[s.pulseRing, { backgroundColor: color, opacity, transform: [{ scale }] }]}
+      />
+      <View style={[s.pulseCore, { backgroundColor: color }]} />
+    </View>
+  );
+}
 
 export default function HomeScreen({ navigation }) {
   const { items, points, streak, markUsed, removeItem } = useInventory();
@@ -44,6 +81,10 @@ export default function HomeScreen({ navigation }) {
     return 'Great job! All items are fresh. Add groceries to keep tracking.';
   }, [items]);
 
+  // ── Glassmorphic Smart Tip card colors, per theme ──
+  const tipGlassBg     = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(74,124,89,0.08)';
+  const tipGlassBorder = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(74,124,89,0.18)';
+
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: colors.primary }]}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
@@ -58,10 +99,14 @@ export default function HomeScreen({ navigation }) {
               <Text style={s.heroTitle}>Your Kitchen</Text>
               <Text style={s.heroSub}>Keep track of your fresh food</Text>
             </View>
-            <TouchableOpacity style={s.btBadge}>
-              <Ionicons name="bluetooth" size={14} color="#fff" />
-              <Text style={s.btText}>Connected</Text>
-            </TouchableOpacity>
+
+            <View style={s.btRow}>
+              <SyncPulseDot color="#4ade80" />
+              <TouchableOpacity style={s.btBadge}>
+                <Ionicons name="bluetooth" size={14} color="#fff" />
+                <Text style={s.btText}>Connected</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Stats row */}
@@ -86,8 +131,8 @@ export default function HomeScreen({ navigation }) {
 
         <View style={s.content}>
 
-          {/* ── SMART TIP ──────────────────────────────────────────── */}
-          <View style={[s.tip, { backgroundColor: colors.primaryPale, borderColor: colors.primaryLight }]}>
+          {/* ── SMART TIP (glassmorphic) ───────────────────────────── */}
+          <View style={[s.tip, { backgroundColor: tipGlassBg, borderColor: tipGlassBorder }]}>
             <Ionicons name="bulb-outline" size={16} color={colors.primary} />
             <Text style={[s.tipText, { color: colors.primary }]}>{smartTip}</Text>
           </View>
@@ -154,9 +199,13 @@ const s = StyleSheet.create({
   heroGreet:   { color: 'rgba(255,255,255,0.7)', fontSize: 13 },
   heroTitle:   { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 2 },
   heroSub:     { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 2 },
+  btRow:       { flexDirection: 'row', alignItems: 'center', gap: 6 },
   btBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5,
                  backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
   btText:      { color: '#fff', fontSize: 11, fontWeight: '500' },
+  pulseWrap:   { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  pulseCore:   { position: 'absolute', width: 8, height: 8, borderRadius: 4 },
+  pulseRing:   { position: 'absolute', width: 8, height: 8, borderRadius: 4 },
   statsRow:    { flexDirection: 'row', gap: 10 },
   statBox:     { flex: 1, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 14, padding: 14, alignItems: 'center' },
   statNum:     { color: '#fff', fontSize: 24, fontWeight: '700' },
@@ -172,7 +221,9 @@ const s = StyleSheet.create({
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   sectionTitle:{ fontSize: 17, fontWeight: '600' },
   seeAll:      { fontSize: 13, fontWeight: '500' },
-  listCard:    { borderRadius: 16, borderWidth: 0.5, overflow: 'hidden' },
+  // overflow left visible (not 'hidden') so each ItemCard's soft ambient
+  // shadow can render outside the strict bounds of this wrapper.
+  listCard:    { borderRadius: 16, borderWidth: 0.5, padding: 2 },
   emptyBox:    { borderRadius: 16, padding: 28, alignItems: 'center' },
   emptyEmoji:  { fontSize: 32, marginBottom: 8 },
   emptyText:   { fontSize: 14 },
