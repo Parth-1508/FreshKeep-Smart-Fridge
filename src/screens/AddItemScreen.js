@@ -535,6 +535,16 @@ export default function AddItemScreen({ navigation }) {
             </View>
 
             <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
+              {receiptItems.length > 0 && (
+                <View style={[s.receiptWarning, { backgroundColor: colors.warning + '18', borderColor: colors.warning }]}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.warning} />
+                  <Text style={[s.receiptWarningText, { color: colors.textPrimary }]}>
+                    <Text style={{ fontWeight: '700', color: colors.warning }}>AI Estimation Notice: </Text>
+                    Expiry dates shown are predicted estimates based on category shelf life. Tap any date button to adjust to the physical package date before saving.
+                  </Text>
+                </View>
+              )}
+
               {receiptItems.length === 0 ? (
                 <View style={{ alignItems: 'center', padding: 40 }}>
                   <Text style={{ fontSize: 40, marginBottom: 10 }}>🗑️</Text>
@@ -692,6 +702,9 @@ const s = StyleSheet.create({
   receiptBtnOutline: { backgroundColor: 'transparent', borderWidth: 1.5 },
   receiptBtnText:    { color: '#fff', fontSize: 15, fontWeight: '600' },
   receiptFrame:      { width: 260, height: 340 },
+  receiptWarning:    { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12,
+                       borderRadius: 12, borderWidth: 1, marginBottom: 16 },
+  receiptWarningText:{ flex: 1, fontSize: 12, lineHeight: 17 },
   receiptRow:        { borderRadius: 14, borderWidth: 0.5, padding: 14, marginBottom: 12 },
   receiptNameInput:  { flex: 1, fontSize: 15, fontWeight: '600', borderBottomWidth: 1, paddingVertical: 4, marginRight: 8 },
   receiptDateBtn:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 20,
