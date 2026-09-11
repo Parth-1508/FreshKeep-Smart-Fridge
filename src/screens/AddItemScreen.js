@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView, ActivityIndicator, Modal
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
@@ -14,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useInventory } from '../context/InventoryContext';
 import { useTheme }     from '../context/ThemeContext';
 import useNotifications from '../hooks/useNotifications';
-import { analyzeFoodPackaging, generateSmartShoppingList } from '../services/geminiService';
+import { analyzeFoodPackaging, generateSmartShoppingList, parseGroceryReceipt } from '../services/geminiService';
 
 const CATEGORIES = [
   { label: 'Milk',       emoji: '🥛' },
@@ -38,11 +39,12 @@ const PRESETS = [
 ];
 
 // ── OPTION C: Replaced Voice with Smart List ──
-const ENTRY_MODES = ['✏️ Manual', '📷 Scan', '🛒 Smart List'];
+// ── Added 4th mode: batch receipt / bill scanning ──
+const ENTRY_MODES = ['✏️ Manual', '📷 Scan', '🛒 Smart List', '🧾 Bill / Receipt'];
 
 export default function AddItemScreen({ navigation }) {
   // ── We need 'items' here so Gemini knows what's in the kitchen ──
-  const { items, addItem } = useInventory();
+  const { items, addItem, addBatchItems } = useInventory();
   const { colors }         = useTheme();
   const { scheduleExpiryAlert } = useNotifications();
 
@@ -66,6 +68,13 @@ export default function AddItemScreen({ navigation }) {
   // Smart List State
   const [smartList, setSmartList] = useState([]);
   const [isGeneratingList, setIsGeneratingList] = useState(false);
+
+  // Bill / Receipt State
+  const [receiptScanning, setReceiptScanning] = useState(false);
+  const [isParsingReceipt, setIsParsingReceipt] = useState(false);
+  const [receiptItems, setReceiptItems] = useState([]);
+  const [showReceiptReview, setShowReceiptReview] = useState(false);
+  const [editingDateRowId, setEditingDateRowId] = useState(null);
 
   const [permission, requestPermission] = useCameraPermissions();
 
@@ -165,6 +174,119 @@ export default function AddItemScreen({ navigation }) {
     } finally {
       setIsGeneratingList(false);
     }
+  }
+
+  // ── 🧾 BATCH RECEIPT SCANNING ──────────────────────────────────────────
+  async function openReceiptCamera() {
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) return;
+    }
+    setReceiptScanning(true);
+  }
+
+  async function captureReceipt() {
+    if (!cameraRef.current) return;
+    setIsParsingReceipt(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.8 });
+      await processReceiptImage(photo.base64);
+      setReceiptScanning(false);
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Scan Failed", "Couldn't read the receipt clearly. Please try again.");
+    } finally {
+      setIsParsingReceipt(false);
+    }
+  }
+
+  async function pickReceiptFromGallery() {
+    try {
+      const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permResult.granted) {
+        Alert.alert('Permission needed', 'Allow photo library access to upload a receipt.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        base64: true,
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setIsParsingReceipt(true);
+      await processReceiptImage(result.assets[0].base64);
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Upload Failed", "Couldn't read that image. Please try another.");
+    } finally {
+      setIsParsingReceipt(false);
+    }
+  }
+
+  async function processReceiptImage(base64) {
+    const parsed = await parseGroceryReceipt(base64);
+
+    if (!parsed || parsed.length === 0) {
+      Alert.alert("No items found", "We couldn't find any grocery items on that receipt. Try a clearer photo.");
+      return;
+    }
+
+    const reviewRows = parsed.map((item, idx) => ({
+      _rowId:             `${Date.now()}_${idx}`,
+      name:               item.name || 'Unknown item',
+      category:           CATEGORIES.some(c => c.label === item.category) ? item.category : 'Other',
+      quantity:           item.quantity || '1 unit',
+      estimatedShelfDays: Number.isFinite(item.estimatedShelfDays) ? item.estimatedShelfDays : 7,
+      expiry:             addDays(new Date(), Number.isFinite(item.estimatedShelfDays) ? item.estimatedShelfDays : 7),
+    }));
+
+    setReceiptItems(reviewRows);
+    setShowReceiptReview(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+
+  function updateReceiptItem(rowId, changes) {
+    setReceiptItems(prev => prev.map(ri => (ri._rowId === rowId ? { ...ri, ...changes } : ri)));
+  }
+
+  function removeReceiptItem(rowId) {
+    setReceiptItems(prev => prev.filter(ri => ri._rowId !== rowId));
+  }
+
+  async function commitReceiptItems() {
+    if (receiptItems.length === 0) {
+      setShowReceiptReview(false);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    const toCommit = receiptItems
+      .map(ri => {
+        const matchedCat = CATEGORIES.find(c => c.label === ri.category);
+        return {
+          name:       ri.name.trim(),
+          emoji:      matchedCat?.emoji || '📦',
+          category:   ri.category || 'Other',
+          quantity:   ri.quantity || null,
+          expiryDate: ri.expiry.toISOString(),
+        };
+      })
+      .filter(it => it.name);
+
+    const added = await addBatchItems(toCommit);
+
+    // Schedule an expiry reminder for every newly committed item
+    for (const it of added || toCommit) {
+      await scheduleExpiryAlert({ ...it, id: it.id || (Date.now().toString() + Math.random().toString(36).slice(2)) });
+    }
+
+    setReceiptItems([]);
+    setShowReceiptReview(false);
+    setMode(0);
+    navigation.navigate('Home');
   }
 
   function handleAddCustomCategory() {
@@ -344,6 +466,149 @@ export default function AddItemScreen({ navigation }) {
           </ScrollView>
         )}
 
+        {/* MODE 3: BILL / RECEIPT (chooser) */}
+        {mode === 3 && !receiptScanning && (
+          <ScrollView contentContainerStyle={s.receiptIntro}>
+            <Text style={s.receiptIntroEmoji}>🧾</Text>
+            <Text style={[s.receiptIntroTitle, { color: colors.textPrimary }]}>Scan a Bill or Receipt</Text>
+            <Text style={[s.receiptIntroSub, { color: colors.textSecondary }]}>
+              Works with Blinkit, Zepto, Instamart or supermarket slips. We'll read every item and estimate expiry dates for you — review and edit before it's added.
+            </Text>
+
+            <TouchableOpacity
+              style={[s.receiptBtn, { backgroundColor: colors.primary }]}
+              onPress={openReceiptCamera}
+              disabled={isParsingReceipt}
+            >
+              <Ionicons name="camera-outline" size={18} color="#fff" />
+              <Text style={s.receiptBtnText}>Take Photo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.receiptBtn, s.receiptBtnOutline, { borderColor: colors.primary }]}
+              onPress={pickReceiptFromGallery}
+              disabled={isParsingReceipt}
+            >
+              <Ionicons name="image-outline" size={18} color={colors.primary} />
+              <Text style={[s.receiptBtnText, { color: colors.primary }]}>Choose from Gallery</Text>
+            </TouchableOpacity>
+
+            {isParsingReceipt && (
+              <View style={{ marginTop: 24, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ marginTop: 10, color: colors.textSecondary }}>Reading your receipt…</Text>
+              </View>
+            )}
+          </ScrollView>
+        )}
+
+        {/* MODE 3: BILL / RECEIPT (live camera) */}
+        {mode === 3 && receiptScanning && (
+          <View style={s.cameraWrap}>
+            <CameraView style={s.camera} facing="back" ref={cameraRef} />
+            <View style={[s.scanOverlay, StyleSheet.absoluteFillObject]}>
+              <View style={[s.scanFrame, s.receiptFrame]} />
+              <Text style={s.scanHint}>Frame the full receipt</Text>
+
+              <TouchableOpacity
+                style={[s.captureBtn, isParsingReceipt && { opacity: 0.5 }]}
+                onPress={captureReceipt} disabled={isParsingReceipt}
+              >
+                {isParsingReceipt ? <ActivityIndicator size="large" color="#4a7c59" /> : <View style={s.captureInner} />}
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={s.cancelScan} onPress={() => setReceiptScanning(false)}>
+              <Text style={s.cancelText}>✕ Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* RECEIPT REVIEW MODAL: edit / remove parsed items before committing */}
+        <Modal visible={showReceiptReview} animationType="slide" onRequestClose={() => setShowReceiptReview(false)}>
+          <SafeAreaView style={[s.safe, { backgroundColor: colors.bg }]}>
+            <View style={[s.header, { backgroundColor: colors.primary }]}>
+              <Text style={s.headerTitle}>Review Receipt</Text>
+              <Text style={s.headerSub}>
+                {receiptItems.length} item{receiptItems.length !== 1 ? 's' : ''} found — edit before adding
+              </Text>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
+              {receiptItems.length === 0 ? (
+                <View style={{ alignItems: 'center', padding: 40 }}>
+                  <Text style={{ fontSize: 40, marginBottom: 10 }}>🗑️</Text>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                    All items removed. Go back and scan a new receipt to try again.
+                  </Text>
+                </View>
+              ) : (
+                receiptItems.map(ri => {
+                  const matchedCat = CATEGORIES.find(c => c.label === ri.category);
+                  return (
+                    <View key={ri._rowId} style={[s.receiptRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                        <Text style={{ fontSize: 26, marginRight: 10 }}>{matchedCat?.emoji || '📦'}</Text>
+                        <TextInput
+                          style={[s.receiptNameInput, { color: colors.textPrimary, borderColor: colors.border }]}
+                          value={ri.name}
+                          onChangeText={(t) => updateReceiptItem(ri._rowId, { name: t })}
+                        />
+                        <TouchableOpacity onPress={() => removeReceiptItem(ri._rowId)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Ionicons name="close-circle" size={22} color="#e74c3c" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: colors.textSecondary }}>{ri.quantity} • {ri.category}</Text>
+                        <TouchableOpacity
+                          style={[s.receiptDateBtn, { borderColor: colors.border }]}
+                          onPress={() => setEditingDateRowId(ri._rowId)}
+                        >
+                          <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+                          <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600', marginLeft: 4 }}>
+                            Expires {format(ri.expiry, 'dd MMM')}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {editingDateRowId === ri._rowId && (
+                        <DateTimePicker
+                          value={ri.expiry}
+                          mode="date"
+                          minimumDate={new Date()}
+                          onChange={(_, date) => {
+                            setEditingDateRowId(null);
+                            if (date) updateReceiptItem(ri._rowId, { expiry: date });
+                          }}
+                        />
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            <View style={[s.receiptFooter, { backgroundColor: colors.bg, borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[s.receiptCancelBtn, { borderColor: colors.border }]}
+                onPress={() => { setShowReceiptReview(false); setReceiptItems([]); }}
+              >
+                <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Discard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.addBtn, { flex: 1, backgroundColor: colors.primary, opacity: receiptItems.length === 0 ? 0.5 : 1 }]}
+                onPress={commitReceiptItems}
+                disabled={receiptItems.length === 0}
+              >
+                <Text style={s.addBtnText}>
+                  + Add {receiptItems.length} Item{receiptItems.length !== 1 ? 's' : ''}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </Modal>
+
         {/* CUSTOM CATEGORY MODAL */}
         <Modal visible={showCustomModal} transparent animationType="fade">
           <View style={s.modalOverlay}>
@@ -416,6 +681,23 @@ const s = StyleSheet.create({
   smartListHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   smartCard:    { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 16, borderWidth: 0.5, marginBottom: 12 },
   quickAddBtn:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+
+  // Bill / Receipt Styles
+  receiptIntro:      { padding: 24, paddingTop: 40, alignItems: 'center' },
+  receiptIntroEmoji: { fontSize: 48, marginBottom: 14 },
+  receiptIntroTitle: { fontSize: 19, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  receiptIntroSub:   { fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 28, paddingHorizontal: 8 },
+  receiptBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                       width: '100%', borderRadius: 14, paddingVertical: 15, marginBottom: 12 },
+  receiptBtnOutline: { backgroundColor: 'transparent', borderWidth: 1.5 },
+  receiptBtnText:    { color: '#fff', fontSize: 15, fontWeight: '600' },
+  receiptFrame:      { width: 260, height: 340 },
+  receiptRow:        { borderRadius: 14, borderWidth: 0.5, padding: 14, marginBottom: 12 },
+  receiptNameInput:  { flex: 1, fontSize: 15, fontWeight: '600', borderBottomWidth: 1, paddingVertical: 4, marginRight: 8 },
+  receiptDateBtn:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 20,
+                       paddingHorizontal: 10, paddingVertical: 5 },
+  receiptFooter:     { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 0.5 },
+  receiptCancelBtn:  { paddingHorizontal: 18, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 
   // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },

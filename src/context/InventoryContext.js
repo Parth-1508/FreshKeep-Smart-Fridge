@@ -4,11 +4,76 @@ import { differenceInCalendarDays, isToday, isYesterday, format } from 'date-fns
 
 // 🔥 FIREBASE IMPORTS (Both Firestore for App & RTDB for Magnet)
 import { db, rtdb } from '../../firebase'; 
-import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { ref, set } from 'firebase/database'; // <-- Proper Web SDK for Expo Go
 
 const InvCtx = createContext();
 export const useInventory = () => useContext(InvCtx);
+
+// ── 🌱 ENVIRONMENTAL / MONETARY SAVINGS LEDGER ──────────────────────────────
+// Persisted key for the lifetime impact stats (separate from the current
+// inventory snapshot, since this is a running historical total).
+const IMPACT_STATS_KEY = '@freshkeep_impact_stats';
+const PROFILE_ID_KEY   = 'profileId';
+
+const DEFAULT_IMPACT_STATS = {
+  totalRupeesSaved:  0,
+  totalCO2Prevented: 0,
+  totalItemsRescued: 0,
+};
+
+// Average retail price (₹) assumed "saved" per rescued item, by category.
+const MONETARY_VALUE_BY_CATEGORY = {
+  Milk:       60,
+  Bread:      45,
+  Eggs:       80,
+  Vegetables: 50,
+  Meat:       250,
+  Other:      50,
+};
+
+// Typical weight (kg) of a single rescued item, by category — used to
+// estimate the food waste (and therefore CO2) that was avoided.
+const WASTE_WEIGHT_KG_BY_CATEGORY = {
+  Milk:       1.0,
+  Bread:      0.4,
+  Vegetables: 0.5,
+  Meat:       0.5,
+  Other:      0.3,
+};
+
+// ~1.9 kg of CO2-equivalent is prevented per kg of food waste avoided
+// (standard food-waste carbon-footprint approximation).
+const CO2_KG_PER_KG_FOOD = 1.9;
+
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// Computes the ₹ and CO2 impact of rescuing a single item. Falls back to the
+// "Other" rates for any category not explicitly listed above (including
+// user-created custom categories).
+function computeImpact(item) {
+  const category = item?.category || 'Other';
+  const rupees   = MONETARY_VALUE_BY_CATEGORY[category] ?? MONETARY_VALUE_BY_CATEGORY.Other;
+  const weightKg = WASTE_WEIGHT_KG_BY_CATEGORY[category] ?? WASTE_WEIGHT_KG_BY_CATEGORY.Other;
+  const co2      = weightKg * CO2_KG_PER_KG_FOOD;
+  return { rupees, co2 };
+}
+
+// There's no Firebase Auth sign-in flow wired up in this app yet (login just
+// stores a local display name) — so we mint and persist a stable anonymous
+// profile id the first time it's needed, and use that as the Firestore
+// `users` document id to sync lifetime impact stats to.
+async function getOrCreateProfileId() {
+  let id = await AsyncStorage.getItem(PROFILE_ID_KEY);
+  if (!id) {
+    id = 'user_' + Date.now().toString() + Math.random().toString(36).slice(2);
+    await AsyncStorage.setItem(PROFILE_ID_KEY, id);
+  }
+  return id;
+}
+// ─────────────────────────────────────────────────────────────────────────
 
 function enrich(rawItems) {
   const now = new Date();
@@ -42,24 +107,29 @@ export function InventoryProvider({ children }) {
   const [lastSaveDate, setLastSaveDate] = useState(null);
   const [loaded,       setLoaded]       = useState(false);
   const [userName,     setUserName]     = useState('');
+  const [impactStats,  setImpactStats]  = useState(DEFAULT_IMPACT_STATS);
 
   useEffect(() => {
     async function load() {
       try {
         const [
           rawItems, rawPoints, rawStreak,
-          rawLastSave, rawUser,
+          rawLastSave, rawUser, rawImpact,
         ] = await Promise.all([
           AsyncStorage.getItem('inventory'),
           AsyncStorage.getItem('points'),
           AsyncStorage.getItem('streak'),
           AsyncStorage.getItem('lastSaveDate'),
           AsyncStorage.getItem('userName'),
+          AsyncStorage.getItem(IMPACT_STATS_KEY),
         ]);
 
         const parsedItems = rawItems ? enrich(JSON.parse(rawItems)) : [];
         let activeStreak = rawStreak ? parseInt(rawStreak) : 0;
         const parsedPoints = rawPoints ? parseInt(rawPoints) : 0;
+        const parsedImpact = rawImpact
+          ? { ...DEFAULT_IMPACT_STATS, ...JSON.parse(rawImpact) }
+          : DEFAULT_IMPACT_STATS;
 
         if (rawLastSave) {
           if (differenceInCalendarDays(new Date(), new Date(rawLastSave)) >= 2) {
@@ -79,6 +149,7 @@ export function InventoryProvider({ children }) {
         setStreak(activeStreak);
         setLastSaveDate(rawLastSave || null);
         setUserName(rawUser || '');
+        setImpactStats(parsedImpact);
       } catch (e) {
         console.warn('InventoryContext load error:', e);
       } finally {
@@ -98,6 +169,26 @@ export function InventoryProvider({ children }) {
     AsyncStorage.setItem('points', String(points));
     AsyncStorage.setItem('streak', String(streak));
   }, [points, streak, loaded]);
+
+  // ── 🌱 Persist + sync the impact ledger whenever it changes ──────────────
+  const syncImpactToFirestore = useCallback(async (stats) => {
+    try {
+      const profileId = await getOrCreateProfileId();
+      await setDoc(doc(db, 'users', profileId), cleanFirestoreData({
+        ...stats,
+        userName,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+    } catch (e) {
+      console.error('Firebase Impact Sync Error:', e);
+    }
+  }, [userName]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(IMPACT_STATS_KEY, JSON.stringify(impactStats));
+    syncImpactToFirestore(impactStats);
+  }, [impactStats, loaded, syncImpactToFirestore]);
 
   // ── 🐛 BUG FIX: STRICT 1-PER-DAY STREAK COUNTER ────────────────────────
   const recordSaveAction = useCallback(async () => {
@@ -178,6 +269,36 @@ function cleanFirestoreData(data) {
     } catch(e) { console.error("Firebase Add Error:", e); }
   }, []);
 
+  // ── 🧾 BATCH RECEIPT SCANNING: commit many parsed items in one shot ──────
+  const addBatchItems = useCallback(async (itemsArray) => {
+    const safeItems = Array.isArray(itemsArray) ? itemsArray : [];
+    if (safeItems.length === 0) return;
+
+    const baseTime = Date.now();
+    const newItems = safeItems.map((item, idx) => ({
+      category: 'Other',
+      quantity: null,
+      ...item,
+      id: (baseTime + idx).toString() + Math.random().toString(36).slice(2),
+      createdAt: new Date().toISOString(),
+    }));
+
+    setItems(prev => enrich([...prev, ...newItems]));
+    setPoints(p => p + newItems.length * 5);
+
+    try {
+      const batch = writeBatch(db);
+      newItems.forEach(item => {
+        batch.set(doc(db, 'inventory', item.id), cleanFirestoreData(item));
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error("Firebase Batch Add Error:", e);
+    }
+
+    return newItems;
+  }, []);
+
   const markUsed = useCallback(async (id) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
@@ -185,7 +306,15 @@ function cleanFirestoreData(data) {
     setItems(prev => prev.filter(i => i.id !== id));
     const bonus = item.status === 'urgent' ? 20 : item.status === 'warning' ? 15 : 10;
     setPoints(p => p + bonus);
-    
+
+    // ── 🌱 Log the ₹ / CO2 impact of rescuing this item before it went to waste ──
+    const { rupees, co2 } = computeImpact(item);
+    setImpactStats(prev => ({
+      totalRupeesSaved:  round2(prev.totalRupeesSaved + rupees),
+      totalCO2Prevented: round2(prev.totalCO2Prevented + co2),
+      totalItemsRescued: prev.totalItemsRescued + 1,
+    }));
+
     // Calls our newly fixed daily streak function
     await recordSaveAction();
 
@@ -213,6 +342,9 @@ function cleanFirestoreData(data) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const clearAll = useCallback(async () => {
+    // Note: this clears the *current* fridge contents only. Lifetime impact
+    // stats (₹ saved / CO2 prevented / items rescued) are a historical
+    // ledger and intentionally survive an inventory clear.
     setItems([]);
     setPoints(0);
     setStreak(0);
@@ -226,9 +358,10 @@ function cleanFirestoreData(data) {
     setStreak(0);
     setLastSaveDate(null);
     setUserName('');
+    setImpactStats(DEFAULT_IMPACT_STATS);
     await AsyncStorage.multiRemove([
       'inventory', 'points', 'streak', 'lastSaveDate',
-      'userName', 'onboardingDone', 'theme',
+      'userName', 'onboardingDone', 'theme', IMPACT_STATS_KEY,
     ]);
   }, []);
 
@@ -237,8 +370,12 @@ function cleanFirestoreData(data) {
   return (
     <InvCtx.Provider value={{
       items, points, streak, userName, lastSaveDate,
-      addItem, removeItem, markUsed, updateItem,
+      addItem, addBatchItems, removeItem, markUsed, updateItem,
       clearAll, logout,
+      // 🌱 Environmental / Monetary Savings Ledger
+      totalRupeesSaved:  impactStats.totalRupeesSaved,
+      totalCO2Prevented: impactStats.totalCO2Prevented,
+      totalItemsRescued: impactStats.totalItemsRescued,
     }}>
       {children}
     </InvCtx.Provider>

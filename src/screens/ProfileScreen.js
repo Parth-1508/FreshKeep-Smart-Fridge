@@ -20,13 +20,26 @@ const ACHIEVEMENTS = [
   { id:'a5', emoji:'🌱', title:'Green Starter',       desc:'Added 10 items to inventory'          },
 ];
 
+// ── 🌱 Impact ledger milestones — unlocked as the lifetime savings ledger grows ──
+const IMPACT_MILESTONES = [
+  { id:'eco1',   emoji:'🌱', title:'Eco Warrior',       desc:'5kg CO₂ Saved',      check: s => s.totalCO2Prevented >= 5   },
+  { id:'eco2',   emoji:'🌍', title:'Planet Protector',  desc:'20kg CO₂ Saved',     check: s => s.totalCO2Prevented >= 20  },
+  { id:'money1', emoji:'💰', title:'Budget Saver',      desc:'₹500 Saved',        check: s => s.totalRupeesSaved >= 500  },
+  { id:'money2', emoji:'🏆', title:'Thrifty Champion',  desc:'₹2000 Saved',       check: s => s.totalRupeesSaved >= 2000 },
+  { id:'rescue1',emoji:'🛟', title:'Waste Buster',      desc:'25 Items Rescued',  check: s => s.totalItemsRescued >= 25  },
+];
+
 const REMINDER_OPTIONS = [
   '1 day before','2 days before','3 days before','5 days before','7 days before',
 ];
 
 export default function ProfileScreen() {
   // ── PATCHED: Added removeItem to the destructured context ──
-  const { points, streak, items, lastSaveDate, logout, userName, clearAll, removeItem } = useInventory();
+  // ── 🌱 Live impact ledger: ₹ saved, CO2 prevented, items rescued ──
+  const {
+    points, streak, items, lastSaveDate, logout, userName, clearAll, removeItem,
+    totalRupeesSaved, totalCO2Prevented, totalItemsRescued,
+  } = useInventory();
   const { colors: C, isDark, toggleDark } = useTheme();
   const navigation = useNavigation();
 
@@ -35,8 +48,6 @@ export default function ProfileScreen() {
   const [showReminder, setShowReminder] = useState(false);
   const [btConnected,  setBtConnected]  = useState(false);
 
-  const itemsSaved    = Math.max(0, Math.floor((points - items.length * 5) / 12));
-  const co2Saved      = (itemsSaved * 0.4).toFixed(1);
   const level         = points >= 300 ? 'Gold' : points >= 100 ? 'Silver' : 'Bronze';
   const nextThreshold = points >= 300 ? 600    : points >= 100 ? 300      : 100;
   const nextLevel     = level === 'Gold' ? 'Platinum' : level === 'Silver' ? 'Gold' : 'Silver';
@@ -47,10 +58,10 @@ export default function ProfileScreen() {
   const streakAtRisk = !savedToday && !savedYesterday && streak > 0;
 
   function isAchieved(id) {
-    if (id === 'a1') return itemsSaved >= 1;
-    if (id === 'a2') return itemsSaved >= 5;
+    if (id === 'a1') return totalItemsRescued >= 1;
+    if (id === 'a2') return totalItemsRescued >= 5;
     if (id === 'a3') return streak >= 7;
-    if (id === 'a4') return itemsSaved >= 20;
+    if (id === 'a4') return totalItemsRescued >= 20;
     if (id === 'a5') return items.length >= 10;
     return false;
   }
@@ -129,13 +140,46 @@ export default function ProfileScreen() {
             </Text>
           </View>
 
+          {/* ── 🌱 LIVE IMPACT LEDGER: ₹ Money Saved / kg CO2 Prevented ── */}
+          <View style={[s.impactCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <View style={s.impactCol}>
+              <Text style={{ fontSize:22 }}>₹</Text>
+              <Text style={[s.impactValue, { color: C.primary }]}>{totalRupeesSaved.toFixed(0)}</Text>
+              <Text style={[s.impactLabel, { color: C.textSecondary }]}>Money Saved</Text>
+            </View>
+            <View style={[s.impactDivider, { backgroundColor: C.border }]} />
+            <View style={s.impactCol}>
+              <Text style={{ fontSize:22 }}>🌱</Text>
+              <Text style={[s.impactValue, { color: C.primary }]}>{totalCO2Prevented.toFixed(1)}kg</Text>
+              <Text style={[s.impactLabel, { color: C.textSecondary }]}>CO₂ Prevented</Text>
+            </View>
+          </View>
+
+          {/* ── 🏅 Milestone unlock chips ── */}
+          <View style={s.milestoneRow}>
+            {IMPACT_MILESTONES.map(m => {
+              const unlocked = m.check({ totalRupeesSaved, totalCO2Prevented, totalItemsRescued });
+              return (
+                <View key={m.id} style={[
+                  s.milestoneChip,
+                  { backgroundColor: unlocked ? C.primaryPale : C.card, borderColor: unlocked ? C.primary : C.border },
+                ]}>
+                  <Text style={{ fontSize:14, opacity: unlocked ? 1 : 0.35 }}>{m.emoji}</Text>
+                  <Text style={{ fontSize:11.5, fontWeight:'600', marginLeft:5, color: unlocked ? C.primary : C.textLight }}>
+                    {m.title}: {m.desc}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
           <View style={{ flexDirection:'row', gap:8, marginBottom:22 }}>
             {[
               { val: items.length,         label:'Items\nTracked',  icon:'cube-outline'          },
               { val: streak,               label:'Day\nStreak',     icon:'flame-outline',
                 color: streak === 0 ? C.urgent : streakAtRisk ? C.warning : undefined },
-              { val: itemsSaved,           label:'Items\nSaved',    icon:'leaf-outline'           },
-              { val: `${co2Saved}kg`,      label:'CO₂\nSaved',     icon:'earth-outline'          },
+              { val: totalItemsRescued,    label:'Items\nRescued',  icon:'leaf-outline'           },
+              { val: `${totalCO2Prevented.toFixed(1)}kg`, label:'CO₂\nSaved', icon:'earth-outline' },
             ].map((st, i) => (
               <View key={i} style={[s.statBox, { backgroundColor: C.card, borderColor: C.border }]}>
                 <Ionicons name={st.icon} size={18} color={st.color || C.primary} />
@@ -366,6 +410,18 @@ const s = StyleSheet.create({
   card:         { borderRadius:16, borderWidth:0.5, overflow:'hidden' },
   statBox:      { flex:1, borderRadius:14, borderWidth:0.5, padding:12, alignItems:'center', gap:5 },
   sectionTitle: { fontSize:17, fontWeight:'600', marginBottom:10 },
+
+  // 🌱 Impact ledger card + milestone chips
+  impactCard:    { flexDirection:'row', alignItems:'center', borderRadius:16, borderWidth:0.5,
+                   padding:18, marginBottom:16 },
+  impactCol:     { flex:1, alignItems:'center' },
+  impactValue:   { fontSize:22, fontWeight:'700', marginTop:2 },
+  impactLabel:   { fontSize:11, marginTop:3 },
+  impactDivider: { width:0.5, alignSelf:'stretch', marginHorizontal:8 },
+  milestoneRow:  { flexDirection:'row', flexWrap:'wrap', gap:8, marginBottom:22 },
+  milestoneChip: { flexDirection:'row', alignItems:'center', borderRadius:20, borderWidth:1,
+                   paddingHorizontal:11, paddingVertical:7 },
+
   streakBanner: { flexDirection:'row', alignItems:'flex-start', gap:12, padding:14,
                   borderRadius:14, borderWidth:1, marginBottom:22 },
   row:          { flexDirection:'row', alignItems:'center', gap:12, padding:14 },

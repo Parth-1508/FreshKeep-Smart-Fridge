@@ -348,3 +348,69 @@ RULES:
     },
   });
 }
+
+/**
+ * 6. Batch Grocery Receipt / Invoice Parser
+ * Reads a photographed or uploaded receipt (quick-commerce apps like Blinkit,
+ * Zepto, Instamart, or a supermarket slip) and extracts every food line item
+ * so it can be reviewed and added to the inventory in one shot.
+ */
+export async function parseGroceryReceipt(base64Image, mimeType = 'image/jpeg') {
+  const today = new Date().toISOString().split('T')[0];
+
+  const prompt = `You are an expert grocery receipt / invoice parser for Indian quick-commerce and supermarket purchases (Blinkit, Zepto, Instamart, Swiggy Instamart, BigBasket, DMart, and standard printed supermarket slips). Today's date is ${today}.
+
+Read the attached receipt image (it may be a photo of a printed slip OR a screenshot of a digital order summary) and extract every purchased FOOD/GROCERY line item. Ignore delivery fees, platform/handling fees, discounts, coupons, taxes, totals, and any non-food line items.
+
+For EACH item, return:
+1. "name": A clean, human-readable product name (strip SKU codes and redundant pack-size boilerplate, but keep the brand if shown, e.g. "Amul Toned Milk" not "AMUL TND MLK 500ML SKU8213").
+2. "category": Classify into EXACTLY one of these categories: "Milk", "Bread", "Fruits", "Vegetables", "Meat", "Dairy", "Eggs", "Snacks", "Cooked", "Other".
+3. "estimatedShelfDays": A realistic whole number of days this item stays fresh counting from the purchase/delivery date, based on standard perishable-category norms. Use your best judgement per specific product. Typical reference points:
+   - Leafy greens / fresh vegetables: 3-5 days
+   - Milk / paneer / curd: 2-5 days
+   - Bread / bakery: 4-6 days
+   - Eggs: 20-25 days
+   - Fresh meat / fish / chicken: 1-2 days
+   - Fruits: 4-10 days depending on type
+   - Packaged snacks, frozen food, staples: 60-180 days
+4. "quantity": The purchased quantity or pack size exactly as printed (e.g. "1L", "500g", "6 pcs", "2 pack"). If illegible, use "1 unit".
+
+Only include real grocery/food line items you can actually read. If the image is not a receipt, or no items can be confidently read, return an empty items array rather than guessing.`;
+
+  const responseSchema = {
+    type: 'OBJECT',
+    properties: {
+      items: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING' },
+            category: { type: 'STRING' },
+            estimatedShelfDays: { type: 'NUMBER' },
+            quantity: { type: 'STRING' },
+          },
+          required: ['name', 'category', 'estimatedShelfDays', 'quantity'],
+        },
+      },
+    },
+    required: ['items'],
+  };
+
+  const data = await callGeminiApi({
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: base64Image } },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema,
+    },
+  });
+
+  return data.items || [];
+}
