@@ -339,6 +339,31 @@ function cleanFirestoreData(data) {
     } catch(e) { console.error("Firebase Update Error:", e); }
   }, []);
 
+  // ── 🎁 REWARDS & COUPON MARKETPLACE REDEMPTION ───────────────────────────
+  const redeemReward = useCallback(async (costInPoints) => {
+    const cost = Number(costInPoints) || 0;
+    if (points < cost) {
+      return false;
+    }
+
+    const newPoints = points - cost;
+    setPoints(newPoints);
+    await AsyncStorage.setItem('points', String(newPoints));
+
+    try {
+      const profileId = await getOrCreateProfileId();
+      await setDoc(doc(db, 'users', profileId), cleanFirestoreData({
+        points: newPoints,
+        userName,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+    } catch (e) {
+      console.error('Firebase Points Sync Error:', e);
+    }
+
+    return true;
+  }, [points, userName]);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const clearAll = useCallback(async () => {
@@ -370,7 +395,7 @@ function cleanFirestoreData(data) {
   return (
     <InvCtx.Provider value={{
       items, points, streak, userName, lastSaveDate,
-      addItem, addBatchItems, removeItem, markUsed, updateItem,
+      addItem, addBatchItems, removeItem, markUsed, updateItem, redeemReward,
       clearAll, logout,
       // 🌱 Environmental / Monetary Savings Ledger
       totalRupeesSaved:  impactStats.totalRupeesSaved,

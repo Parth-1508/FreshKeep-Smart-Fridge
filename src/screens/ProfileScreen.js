@@ -3,14 +3,16 @@ import React, { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Switch, Alert, StatusBar, Image
+  Switch, Alert, StatusBar, Image, Modal, Linking, Clipboard
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { isToday, isYesterday } from 'date-fns';
 import { useInventory } from '../context/InventoryContext';
 import { useTheme }     from '../context/ThemeContext';
+import { REWARDS_CATALOG } from '../constants/rewardsCatalog';
 
 const ACHIEVEMENTS = [
   { id:'a1', emoji:'🥇', title:'First Saver',        desc:'Used your first item before expiry'   },
@@ -34,19 +36,19 @@ const REMINDER_OPTIONS = [
 ];
 
 export default function ProfileScreen() {
-  // ── PATCHED: Added removeItem to the destructured context ──
-  // ── 🌱 Live impact ledger: ₹ saved, CO2 prevented, items rescued ──
   const {
-    points, streak, items, lastSaveDate, logout, userName, clearAll, removeItem,
+    points, streak, items, lastSaveDate, logout, userName, clearAll, removeItem, redeemReward,
     totalRupeesSaved, totalCO2Prevented, totalItemsRescued,
   } = useInventory();
   const { colors: C, isDark, toggleDark } = useTheme();
   const navigation = useNavigation();
 
-  const [notifOn,      setNotifOn]      = useState(true);
-  const [reminderIdx,  setReminderIdx]  = useState(1);
-  const [showReminder, setShowReminder] = useState(false);
-  const [btConnected,  setBtConnected]  = useState(false);
+  const [notifOn,          setNotifOn]          = useState(true);
+  const [reminderIdx,      setReminderIdx]      = useState(1);
+  const [showReminder,     setShowReminder]     = useState(false);
+  const [btConnected,      setBtConnected]      = useState(false);
+  const [showRewardsModal, setShowRewardsModal] = useState(false);
+  const [redeemedVoucher,  setRedeemedVoucher]  = useState(null);
 
   const level         = points >= 300 ? 'Gold' : points >= 100 ? 'Silver' : 'Bronze';
   const nextThreshold = points >= 300 ? 600    : points >= 100 ? 300      : 100;
@@ -64,6 +66,49 @@ export default function ProfileScreen() {
     if (id === 'a4') return totalItemsRescued >= 20;
     if (id === 'a5') return items.length >= 10;
     return false;
+  }
+
+  async function handleRedeemReward(item) {
+    if (points < item.pointsCost) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const needed = item.pointsCost - points;
+      Alert.alert(
+        "Insufficient Points",
+        `You need ${needed} more points to unlock this voucher! Rescue more food items from your fridge to earn points.`
+      );
+      return;
+    }
+
+    const success = await redeemReward(item.pointsCost);
+    if (success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRedeemedVoucher(item);
+    } else {
+      Alert.alert("Error", "Could not redeem voucher right now.");
+    }
+  }
+
+  function handleCopyCode(code) {
+    try {
+      Clipboard.setString(code);
+    } catch (e) {
+      console.warn("Clipboard fallback:", e);
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert("Copied!", `Coupon code '${code}' copied to clipboard.`);
+  }
+
+  async function handleOpenAffiliate(url) {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      console.error("Link Open Error:", e);
+    }
   }
 
   function handleLogout() {
@@ -84,7 +129,6 @@ export default function ProfileScreen() {
     );
   }
 
-  // ── PATCHED: Safe clear function that protects stats ──
   function handleClearData() {
     Alert.alert(
       'Clear Inventory',
@@ -139,6 +183,17 @@ export default function ProfileScreen() {
               {Math.round(progress*100)}% to {nextLevel}
             </Text>
           </View>
+
+          {/* ── 🎁 REWARDS & COUPONS MARKETPLACE BANNER BUTTON ── */}
+          <TouchableOpacity
+            style={[s.rewardsBannerBtn, { backgroundColor: C.primary }]}
+            onPress={() => setShowRewardsModal(true)}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="gift-outline" size={20} color="#fff" />
+            <Text style={s.rewardsBannerText}>🎁 Rewards & Coupons Marketplace</Text>
+            <Ionicons name="chevron-forward" size={18} color="#fff" />
+          </TouchableOpacity>
 
           {/* ── 🌱 LIVE IMPACT LEDGER: ₹ Money Saved / kg CO2 Prevented ── */}
           <View style={[s.impactCard, { backgroundColor: C.card, borderColor: C.border }]}>
@@ -395,6 +450,104 @@ export default function ProfileScreen() {
 
         </View>
       </ScrollView>
+
+      {/* ── 🎁 REWARDS & COUPONS MARKETPLACE MODAL ── */}
+      <Modal visible={showRewardsModal} animationType="slide" onRequestClose={() => setShowRewardsModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+          <View style={[s.rewardsModalHeader, { backgroundColor: C.primary }]}>
+            <View>
+              <Text style={s.rewardsModalTitle}>🎁 Rewards Marketplace</Text>
+              <Text style={s.rewardsModalSub}>Redeem points for real brand vouchers</Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowRewardsModal(false)} style={s.modalCloseBtn}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
+
+            {/* Points balance display banner */}
+            <View style={[s.pointsCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Ionicons name="trophy" size={24} color={C.primary} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={{ fontSize: 12, color: C.textSecondary }}>Available Balance</Text>
+                <Text style={{ fontSize: 20, fontWeight: '700', color: C.textPrimary }}>{points} Points</Text>
+              </View>
+              <View style={[s.pointsBadge, { backgroundColor: C.primaryPale }]}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: C.primary }}>Level: {level}</Text>
+              </View>
+            </View>
+
+            {/* Unlocked Voucher Success Card */}
+            {redeemedVoucher && (
+              <View style={[s.successCard, { backgroundColor: C.card, borderColor: C.primary }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="checkmark-circle" size={24} color={C.primary} />
+                  <Text style={[s.successTitle, { color: C.textPrimary }]}>Voucher Unlocked!</Text>
+                </View>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>{redeemedVoucher.brand} — {redeemedVoucher.title}</Text>
+                <Text style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>{redeemedVoucher.desc}</Text>
+
+                <View style={[s.codeBox, { backgroundColor: C.bg, borderColor: C.border }]}>
+                  <Text style={[s.codeText, { color: C.primary }]}>{redeemedVoucher.code}</Text>
+                  <TouchableOpacity style={[s.copyBtn, { backgroundColor: C.primaryPale }]} onPress={() => handleCopyCode(redeemedVoucher.code)}>
+                    <Ionicons name="copy-outline" size={16} color={C.primary} />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: C.primary, marginLeft: 4 }}>Copy</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity style={[s.affiliateBtn, { backgroundColor: C.primary }]} onPress={() => handleOpenAffiliate(redeemedVoucher.affiliateUrl)}>
+                  <Text style={s.affiliateBtnText}>Shop & Apply Deal ↗</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={{ alignSelf: 'center', marginTop: 10 }} onPress={() => setRedeemedVoucher(null)}>
+                  <Text style={{ fontSize: 12, color: C.textSecondary, textDecorationLine: 'underline' }}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <Text style={[s.sectionTitle, { color: C.textPrimary, marginTop: 10 }]}>Featured Partner Offers</Text>
+
+            {REWARDS_CATALOG.map((reward) => {
+              const canAfford = points >= reward.pointsCost;
+              return (
+                <View key={reward.id} style={[s.rewardCard, { backgroundColor: C.card, borderColor: C.border }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                    <View style={[s.brandIconCircle, { backgroundColor: reward.color + '20' }]}>
+                      <Ionicons name={reward.icon || 'gift'} size={22} color={reward.color} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={[s.rewardBrand, { color: reward.color }]}>{reward.brand}</Text>
+                      <Text style={[s.rewardTitle, { color: C.textPrimary }]}>{reward.title}</Text>
+                    </View>
+                    <View style={[s.costChip, { backgroundColor: canAfford ? C.primaryPale : C.border }]}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: canAfford ? C.primary : C.textSecondary }}>
+                        ⚡ {reward.pointsCost} pts
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={[s.rewardDesc, { color: C.textSecondary }]}>{reward.desc}</Text>
+
+                  <TouchableOpacity
+                    style={[
+                      s.redeemBtn,
+                      { backgroundColor: canAfford ? C.primary : C.border, opacity: canAfford ? 1 : 0.6 }
+                    ]}
+                    onPress={() => handleRedeemReward(reward)}
+                  >
+                    <Text style={s.redeemBtnText}>
+                      {canAfford ? `Redeem for ${reward.pointsCost} pts` : `Need ${reward.pointsCost - points} More Pts`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -410,6 +563,11 @@ const s = StyleSheet.create({
   card:         { borderRadius:16, borderWidth:0.5, overflow:'hidden' },
   statBox:      { flex:1, borderRadius:14, borderWidth:0.5, padding:12, alignItems:'center', gap:5 },
   sectionTitle: { fontSize:17, fontWeight:'600', marginBottom:10 },
+
+  // 🎁 Rewards Banner Button
+  rewardsBannerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                      borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2 },
+  rewardsBannerText:{ flex: 1, color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 10 },
 
   // 🌱 Impact ledger card + milestone chips
   impactCard:    { flexDirection:'row', alignItems:'center', borderRadius:16, borderWidth:0.5,
@@ -432,4 +590,34 @@ const s = StyleSheet.create({
   btBtn:        { width:36, height:36, borderRadius:18, alignItems:'center', justifyContent:'center' },
   logoutBtn:    { flexDirection:'row', alignItems:'center', justifyContent:'center',
                   gap:8, borderWidth:1.5, borderRadius:14, padding:15, marginBottom:16 },
+
+  // Modal Styles
+  rewardsModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                        padding: 20, paddingTop: 16, paddingBottom: 16 },
+  rewardsModalTitle:  { color: '#fff', fontSize: 20, fontWeight: '700' },
+  rewardsModalSub:    { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
+  modalCloseBtn:      { padding: 4 },
+  pointsCard:         { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16,
+                        borderWidth: 0.5, marginBottom: 18 },
+  pointsBadge:        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  rewardCard:         { borderRadius: 16, borderWidth: 0.5, padding: 16, marginBottom: 14 },
+  brandIconCircle:    { width: 42, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  rewardBrand:        { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  rewardTitle:        { fontSize: 15, fontWeight: '700', marginTop: 2 },
+  rewardDesc:         { fontSize: 12, marginBottom: 14, lineHeight: 17 },
+  costChip:           { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  redeemBtn:          { borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  redeemBtnText:      { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+  // Success Redemption Card
+  successCard:        { borderRadius: 16, borderWidth: 1.5, padding: 16, marginBottom: 18 },
+  successTitle:       { fontSize: 16, fontWeight: '700', marginLeft: 8 },
+  codeBox:            { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                        padding: 12, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed',
+                        marginTop: 12, marginBottom: 12 },
+  codeText:           { fontSize: 18, fontWeight: '800', letterSpacing: 1 },
+  copyBtn:            { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10,
+                        paddingVertical: 6, borderRadius: 8 },
+  affiliateBtn:       { borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  affiliateBtnText:   { color: '#fff', fontSize: 14, fontWeight: '700' }
 });
