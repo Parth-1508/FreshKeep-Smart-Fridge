@@ -4,11 +4,13 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   StatusBar, Modal, ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useInventory } from '../context/InventoryContext';
 import { useTheme } from '../context/ThemeContext';
 import { fetchAIRecipes } from '../services/geminiService';
+import { CACHED_RECIPES_KEY, getCachedOrFallbackRecipes } from '../utils/recipeEngine';
 
 // ── Inline ingredient chips shared by the Hero Card and regular cards ──
 // Green "✓ Name" for ingredients already in inventory, muted "○ Name" for
@@ -44,14 +46,31 @@ export default function RecipesScreen() {
   const [selectedRecipe, setSelected] = useState(null);
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'canMake'
 
+  // Load cached recipes immediately on screen initialization
+  useEffect(() => {
+    async function loadCachedFirst() {
+      const initialRecipes = await getCachedOrFallbackRecipes(items);
+      if (initialRecipes && initialRecipes.length > 0) {
+        setRecipes(initialRecipes);
+      }
+    }
+    loadCachedFirst();
+  }, [items]);
+
   const loadRecipes = useCallback(async () => {
     if (items.length === 0) return;
     setLoading(true);
     try {
       const data = await fetchAIRecipes(items);
-      setRecipes(data);
+      if (Array.isArray(data) && data.length > 0) {
+        setRecipes(data);
+        // Persist fresh AI recipes to AsyncStorage for offline use
+        await AsyncStorage.setItem(CACHED_RECIPES_KEY, JSON.stringify(data));
+      }
     } catch (e) {
-      console.error(e);
+      console.warn('⚠️ AIRecipes fetch error, using cached/fallback recipes:', e);
+      const fallback = await getCachedOrFallbackRecipes(items);
+      setRecipes(fallback);
     } finally {
       setLoading(false);
     }
@@ -98,7 +117,7 @@ export default function RecipesScreen() {
             </TouchableOpacity>
           </View>
 
-          {loading ? (
+          {loading && recipes.length === 0 ? (
             <ActivityIndicator size="large" color={C.primary} style={{ marginTop: 40 }} />
           ) : filteredRecipes.length === 0 ? (
             <View style={st.emptyBox}>

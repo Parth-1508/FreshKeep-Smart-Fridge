@@ -179,11 +179,16 @@ export async function fetchAIRecipes(inventoryItems = []) {
   const prompt = `You are the AI chef for FreshKeep. Analyze this kitchen inventory:
 ${inventoryText}
 
-Suggest 4 practical recipes.
+ASSUMPTIONS & PANTRY STAPLES:
+- Universal household staples are ALWAYS AVAILABLE in the user's kitchen: salt, cooking oil/ghee, mustard seeds, turmeric, green chilies, water, sugar, and basic Indian spices.
+- Do NOT treat missing salt, oil, or basic spices as missing ingredients when determining "canMake".
+
+Suggest 4 practical recipes prioritizing zero-waste Indian household meals (e.g., expiring milk -> Kheer/Paneer/Kadhi, leftover bread -> Bread Upma/Toast, ripening tomatoes/curd -> Sabzi/Rasam/Raita).
+
 Rules:
 1. Priority: Use items where status is 'urgent' or 'expired'.
-2. Field "canMake": Set to true ONLY if all main ingredients are present in the inventory.
-3. Ingredients: List ingredients with "name" and "have" boolean indicating if the user currently has it.`;
+2. Field "canMake": Set to true if all main food ingredients are present in the inventory (ignoring basic kitchen staples).
+3. Ingredients: List main food ingredients with "name" and "have" boolean indicating if the user has it. Set "have" to true for basic staples or items present in inventory.`;
 
   const responseSchema = {
     type: 'OBJECT',
