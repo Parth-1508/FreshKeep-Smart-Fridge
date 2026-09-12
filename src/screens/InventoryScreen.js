@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useInventory } from '../context/InventoryContext';
 import { useTheme } from '../context/ThemeContext';
 import ItemCard from '../components/ItemCard';
+import UndoToast from '../components/UndoToast';
 
 // Freshness status filter — mirrors the statuses ItemCard already renders as
 // pill badges (fresh / warning / urgent / expired).
@@ -20,12 +21,15 @@ const STATUS_TABS = [
 const CATEGORY_CHIPS = ['All', 'Dairy', 'Bread', 'Vegetables', 'Fruits', 'Meat', 'Cooked'];
 
 export default function InventoryScreen({ navigation }) {
-  const { items, markUsed, removeItem } = useInventory();
+  const { items, markUsed, removeItem, undoRemoveItem } = useInventory();
   const { colors } = useTheme();
 
-  const [search, setSearch]     = useState('');
-  const [status, setStatus]     = useState('all');
-  const [category, setCategory] = useState('All');
+  const [search, setSearch]           = useState('');
+  const [status, setStatus]           = useState('all');
+  const [category, setCategory]       = useState('All');
+  const [lastRemovedItem, setLastRemovedItem] = useState(null);
+  const [toastMessage, setToastMessage]       = useState('');
+  const [toastVisible, setToastVisible]       = useState(false);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -37,6 +41,34 @@ export default function InventoryScreen({ navigation }) {
       return matchesSearch && matchesStatus && matchesCategory;
     });
   }, [items, search, status, category]);
+
+  function handleMarkUsed(id) {
+    const target = items.find(i => i.id === id);
+    if (!target) return;
+
+    markUsed(id);
+    setLastRemovedItem(target);
+    setToastMessage(`${target.emoji || '🌿'} ${target.name} marked as used`);
+    setToastVisible(true);
+  }
+
+  function handleRemoveItem(id) {
+    const target = items.find(i => i.id === id);
+    if (!target) return;
+
+    removeItem(id);
+    setLastRemovedItem(target);
+    setToastMessage(`${target.emoji || '🗑️'} ${target.name} removed`);
+    setToastVisible(true);
+  }
+
+  function handleUndo() {
+    if (lastRemovedItem) {
+      undoRemoveItem(lastRemovedItem);
+      setLastRemovedItem(null);
+      setToastVisible(false);
+    }
+  }
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: colors.bg }]}>
@@ -130,8 +162,8 @@ export default function InventoryScreen({ navigation }) {
         renderItem={({ item, index }) => (
           <ItemCard
             item={item}
-            onDone={markUsed}
-            onDelete={removeItem}
+            onDone={handleMarkUsed}
+            onDelete={handleRemoveItem}
             isLast={index === filteredItems.length - 1}
             colors={colors}
           />
@@ -143,6 +175,15 @@ export default function InventoryScreen({ navigation }) {
               : 'No items match your search or filters.'}
           </Text>
         }
+      />
+
+      {/* ── FLOATING UNDO SNACKBAR ── */}
+      <UndoToast
+        visible={toastVisible}
+        message={toastMessage}
+        onUndo={handleUndo}
+        onDismiss={() => setToastVisible(false)}
+        colors={colors}
       />
     </SafeAreaView>
   );
@@ -161,8 +202,6 @@ const s = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
   backBtn: { padding: 4 },
 
-  // Sticky filter zone sits outside the FlatList's scrollable content, so it
-  // stays pinned to the top of the screen while the item list scrolls below.
   stickyZone:   { paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1 },
   searchBar:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16,
                   borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
@@ -173,6 +212,6 @@ const s = StyleSheet.create({
   catChip:      { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
   catChipText:  { fontSize: 12.5, fontWeight: '500' },
 
-  list: { padding: 16 },
+  list: { padding: 16, paddingBottom: 80 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 16 }
 });

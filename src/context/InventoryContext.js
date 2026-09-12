@@ -364,6 +364,22 @@ function cleanFirestoreData(data) {
     return true;
   }, [points, userName]);
 
+  const undoRemoveItem = useCallback(async (item) => {
+    if (!item || !item.id) return;
+
+    setItems(prev => enrich([...prev, item]));
+
+    // Revert bonus points
+    const bonus = item.status === 'urgent' ? 20 : item.status === 'warning' ? 15 : 10;
+    setPoints(p => Math.max(0, p - bonus));
+
+    try {
+      await setDoc(doc(db, 'inventory', item.id), cleanFirestoreData(item));
+    } catch (e) {
+      console.error('Firebase Undo Error:', e);
+    }
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const clearAll = useCallback(async () => {
@@ -395,7 +411,7 @@ function cleanFirestoreData(data) {
   return (
     <InvCtx.Provider value={{
       items, points, streak, userName, lastSaveDate,
-      addItem, addBatchItems, removeItem, markUsed, updateItem, redeemReward,
+      addItem, addBatchItems, removeItem, markUsed, updateItem, redeemReward, undoRemoveItem,
       clearAll, logout,
       // 🌱 Environmental / Monetary Savings Ledger
       totalRupeesSaved:  impactStats.totalRupeesSaved,

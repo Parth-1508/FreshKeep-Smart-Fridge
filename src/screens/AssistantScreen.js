@@ -11,6 +11,66 @@ import { useInventory } from '../context/InventoryContext';
 import { useVoiceAssistant, buildActionHandler } from '../assistant/VoiceAssistant';
 import { processTextAssistantMessage } from '../services/geminiService';
 
+// ── 🎙️ 5 Animated Waveform Bars for Kira Voice Assistant ──
+function AudioWaveform({ status, color }) {
+  const bars = [
+    useRef(new Animated.Value(8)).current,
+    useRef(new Animated.Value(18)).current,
+    useRef(new Animated.Value(28)).current,
+    useRef(new Animated.Value(18)).current,
+    useRef(new Animated.Value(8)).current,
+  ];
+
+  useEffect(() => {
+    if (status === 'recording' || status === 'speaking') {
+      const createAnim = (animVal, minH, maxH, duration) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(animVal, { toValue: maxH, duration, useNativeDriver: false }),
+            Animated.timing(animVal, { toValue: minH, duration, useNativeDriver: false }),
+          ])
+        );
+
+      const anims = [
+        createAnim(bars[0], 8, 28, 300),
+        createAnim(bars[1], 12, 38, 450),
+        createAnim(bars[2], 18, 48, 350),
+        createAnim(bars[3], 12, 36, 400),
+        createAnim(bars[4], 8, 26, 320),
+      ];
+
+      Animated.parallel(anims).start();
+    } else {
+      bars[0].setValue(8);
+      bars[1].setValue(14);
+      bars[2].setValue(22);
+      bars[3].setValue(14);
+      bars[4].setValue(8);
+    }
+  }, [status]);
+
+  if (status !== 'recording' && status !== 'speaking') return null;
+
+  return (
+    <View style={wfStyle.container}>
+      {bars.map((barAnim, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            wfStyle.bar,
+            { height: barAnim, backgroundColor: color },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+const wfStyle = StyleSheet.create({
+  container: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 50, marginBottom: 8 },
+  bar: { width: 5, borderRadius: 3 },
+});
+
 export default function AssistantScreen({ navigation }) {
   const { colors: C, isDark } = useTheme();
   const { items, addItem, removeItem } = useInventory();
@@ -25,7 +85,6 @@ export default function AssistantScreen({ navigation }) {
     }
   ]);
   
-  // ── PATCHED: Text Input State ──
   const [inputText, setInputText] = useState('');
 
   const handleKiraResponse = async (parsed) => {
@@ -40,41 +99,20 @@ export default function AssistantScreen({ navigation }) {
     await executeDatabaseAction(parsed);
   };
 
-  // ── PATCHED: Passed 'messages' into the hook ──
   const { status, startListening, stopListening } = useVoiceAssistant(items, messages, handleKiraResponse);
 
   const scrollViewRef = useRef();
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    if (status === 'recording') {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true })
-        ])
-      ).start();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [status]);
-
-  // ── PATCHED: Function to handle typing to Kira ──
   const handleSendText = async () => {
     if (!inputText.trim()) return;
     const userText = inputText.trim();
     setInputText('');
     
-    // Add user message to UI immediately
     setMessages(prev => [...prev, { role: 'user', text: userText }]);
 
     try {
       const parsed = await processTextAssistantMessage(userText, items, messages);
-      
-      // Add Kira's reply to UI
       setMessages(prev => [...prev, { role: 'kira', text: parsed.reply }]);
-      
-      // Execute any actions (like adding items to the database)
       const executeDatabaseAction = buildActionHandler(addItem, removeItem, items);
       await executeDatabaseAction(parsed);
     } catch (e) {
@@ -83,10 +121,8 @@ export default function AssistantScreen({ navigation }) {
     }
   };
 
-
   return (
-    // ── PATCHED: Keyboard Avoider moved to the absolute outside ──
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: C.bg }} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
@@ -151,6 +187,9 @@ export default function AssistantScreen({ navigation }) {
         </View>
 
         <View style={[st.micArea, { backgroundColor: C.card, borderTopColor: C.border }]}>
+          {/* Animated 5 Sound Wave Bars */}
+          <AudioWaveform status={status} color={status === 'recording' ? '#e74c3c' : C.primary} />
+
           <Pressable style={[st.micBtn, { backgroundColor: status === 'recording' ? '#e74c3c' : C.primary }]} onPressIn={startListening} onPressOut={stopListening}>
             <Ionicons name={status === 'recording' ? 'stop' : 'mic'} size={32} color="#fff" />
           </Pressable>
@@ -173,11 +212,10 @@ const st = StyleSheet.create({
   kiraLabel: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
   kiraName: { fontSize: 11, fontWeight: '700', color: '#5a8f6b' },
   
-  // ── PATCHED: Text Input Styles ──
   inputArea: { flexDirection: 'row', padding: 12, borderTopWidth: 0.5, alignItems: 'center' },
   textInput: { flex: 1, borderWidth: 0.5, borderRadius: 20, paddingHorizontal: 16, height: 40, marginRight: 10 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   
-  micArea: { alignItems: 'center', paddingVertical: 20, borderTopWidth: 0.5 },
-  micBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
+  micArea: { alignItems: 'center', paddingVertical: 16, borderTopWidth: 0.5 },
+  micBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
 });
